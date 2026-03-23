@@ -1,3 +1,13 @@
+You will need to get a spotify client ID (google how to do this) and create a .env.local file with:
+
+NEXT_PUBLIC_SPOTIFY_CLIENT_ID=your_client_ID_here
+NEXT_PUBLIC_REDIRECT_URI=http://127.0.0.1:3000
+
+Then run npm install
+then run npm run dev
+then in chrome open localhost:3000
+
+################################################
 This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
 
 ## Getting Started
