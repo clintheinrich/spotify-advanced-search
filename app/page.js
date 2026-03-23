@@ -55,15 +55,29 @@ export default function Home() {
   const CLIENT_ID = process.env.NEXT_PUBLIC_SPOTIFY_CLIENT_ID;
   const SCOPES = 'playlist-read-private playlist-read-collaborative';
 
+  const normalizeRedirectUri = (value) => {
+    try {
+      const normalizedUrl = new URL(value);
+
+      if (!normalizedUrl.pathname) {
+        normalizedUrl.pathname = '/';
+      }
+
+      return normalizedUrl.toString();
+    } catch {
+      return value;
+    }
+  };
+
   const getRedirectUri = () => {
     const configuredUri = process.env.NEXT_PUBLIC_REDIRECT_URI?.trim();
 
     if (configuredUri) {
-      return configuredUri;
+      return normalizeRedirectUri(configuredUri);
     }
 
     if (typeof window !== 'undefined') {
-      return `${window.location.origin}${window.location.pathname}`;
+      return normalizeRedirectUri(`${window.location.origin}${window.location.pathname}`);
     }
 
     return 'http://127.0.0.1:3000/';
