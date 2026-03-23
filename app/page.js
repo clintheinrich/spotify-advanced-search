@@ -53,8 +53,21 @@ export default function Home() {
   });
 
   const CLIENT_ID = process.env.NEXT_PUBLIC_SPOTIFY_CLIENT_ID;
-  const REDIRECT_URI = process.env.NEXT_PUBLIC_REDIRECT_URI || 'http://127.0.0.1:3000';
   const SCOPES = 'playlist-read-private playlist-read-collaborative';
+
+  const getRedirectUri = () => {
+    const configuredUri = process.env.NEXT_PUBLIC_REDIRECT_URI?.trim();
+
+    if (configuredUri) {
+      return configuredUri;
+    }
+
+    if (typeof window !== 'undefined') {
+      return `${window.location.origin}${window.location.pathname}`;
+    }
+
+    return 'http://127.0.0.1:3000/';
+  };
 
   const generateCodeVerifier = () => {
     const array = new Uint8Array(32);
@@ -144,17 +157,20 @@ export default function Home() {
       return;
     }
 
+    const redirectUri = getRedirectUri();
+
     const codeVerifier = generateCodeVerifier();
     const codeChallenge = await generateCodeChallenge(codeVerifier);
 
     sessionStorage.setItem('code_verifier', codeVerifier);
 
-    const authUrl = `https://accounts.spotify.com/authorize?client_id=${CLIENT_ID}&redirect_uri=${encodeURIComponent(REDIRECT_URI)}&scope=${encodeURIComponent(SCOPES)}&response_type=code&code_challenge_method=S256&code_challenge=${codeChallenge}&show_dialog=true`;
+    const authUrl = `https://accounts.spotify.com/authorize?client_id=${CLIENT_ID}&redirect_uri=${encodeURIComponent(redirectUri)}&scope=${encodeURIComponent(SCOPES)}&response_type=code&code_challenge_method=S256&code_challenge=${codeChallenge}&show_dialog=true`;
     window.location.href = authUrl;
   };
 
   const exchangeCodeForToken = async (code) => {
     const codeVerifier = sessionStorage.getItem('code_verifier');
+    const redirectUri = getRedirectUri();
 
     if (!codeVerifier) {
       console.error('Code verifier not found');
@@ -171,7 +187,7 @@ export default function Home() {
         body: new URLSearchParams({
           grant_type: 'authorization_code',
           code,
-          redirect_uri: REDIRECT_URI,
+          redirect_uri: redirectUri,
           client_id: CLIENT_ID,
           code_verifier: codeVerifier,
         }),
