@@ -10,6 +10,8 @@ const searchFilterLabels = {
   albumYear: 'Album year',
 };
 
+const LIKED_SONGS_ID = 'liked-songs';
+
 const formatDuration = (durationMs) => {
   if (!durationMs) {
     return '0:00';
@@ -31,6 +33,10 @@ const getPlaylistDescription = (playlist) => {
 };
 
 const getPlaylistSubtitle = (playlist) => {
+  if (playlist.isLikedSongs) {
+    return `${playlist.tracks.total} tracks • Your saved library`;
+  }
+
   const privacyLabel = playlist.public ? 'Public playlist' : 'Private playlist';
   return `${playlist.tracks.total} tracks • ${privacyLabel}`;
 };
@@ -38,11 +44,14 @@ const getPlaylistSubtitle = (playlist) => {
 export default function Home() {
   const [accessToken, setAccessToken] = useState('');
   const [playlists, setPlaylists] = useState([]);
+  const [nextPlaylistsUrl, setNextPlaylistsUrl] = useState('');
   const [selectedPlaylist, setSelectedPlaylist] = useState(null);
   const [tracks, setTracks] = useState([]);
   const [searchTerm, setSearchTerm] = useState('');
   const [filteredTracks, setFilteredTracks] = useState([]);
   const [loading, setLoading] = useState(false);
+  const [libraryLoading, setLibraryLoading] = useState(false);
+  const [loadingMorePlaylists, setLoadingMorePlaylists] = useState(false);
   const [statusMessage, setStatusMessage] = useState('');
 
   const [searchFilters, setSearchFilters] = useState({
@@ -53,17 +62,11 @@ export default function Home() {
   });
 
   const CLIENT_ID = process.env.NEXT_PUBLIC_SPOTIFY_CLIENT_ID;
-  const SCOPES = 'playlist-read-private playlist-read-collaborative';
+  const SCOPES = 'playlist-read-private playlist-read-collaborative user-library-read';
 
   const normalizeRedirectUri = (value) => {
     try {
-      const normalizedUrl = new URL(value);
-
-      if (!normalizedUrl.pathname) {
-        normalizedUrl.pathname = '/';
-      }
-
-      return normalizedUrl.toString();
+      return new URL(value).toString();
     } catch {
       return value;
     }
@@ -73,14 +76,14 @@ export default function Home() {
     const configuredUri = process.env.NEXT_PUBLIC_REDIRECT_URI?.trim();
 
     if (configuredUri) {
-      return normalizeRedirectUri(configuredUri);
+      return configuredUri;
     }
 
     if (typeof window !== 'undefined') {
       return normalizeRedirectUri(`${window.location.origin}${window.location.pathname}`);
     }
 
-    return 'http://127.0.0.1:3000/';
+    return 'http://127.0.0.1:3000';
   };
 
   const generateCodeVerifier = () => {
@@ -120,7 +123,7 @@ export default function Home() {
 
   useEffect(() => {
     if (accessToken) {
-      fetchPlaylists();
+      fetchLibrary();
     }
   }, [accessToken]);
 
@@ -222,12 +225,66 @@ export default function Home() {
     }
   };
 
-  const fetchPlaylists = async () => {
-    setLoading(true);
+  const fetchLibrary = async () => {
+    setLibraryLoading(true);
     setStatusMessage('');
 
     try {
-      const response = await fetch('https://api.spotify.com/v1/me/playlists?limit=50', {
+      const [savedTracksResponse, playlistsResponse] = await Promise.all([
+        fetch('https://api.spotify.com/v1/me/tracks?limit=1', {
+          headers: {
+            Authorization: `Bearer ${accessToken}`,
+          },
+        }),
+        fetch('https://api.spotify.com/v1/me/playlists?limit=50', {
+          headers: {
+            Authorization: `Bearer ${accessToken}`,
+          },
+        }),
+      ]);
+
+      if (savedTracksResponse.ok && playlistsResponse.ok) {
+        const [savedTracksData, playlistsData] = await Promise.all([
+          savedTracksResponse.json(),
+          playlistsResponse.json(),
+        ]);
+
+        const likedSongsPlaylist = {
+          id: LIKED_SONGS_ID,
+          name: 'Liked Songs',
+          description: 'Every track you have saved to Your Library.',
+          public: false,
+          isLikedSongs: true,
+          images: [],
+          tracks: {
+            total: savedTracksData.total || 0,
+          },
+        };
+
+        setPlaylists([likedSongsPlaylist, ...(playlistsData.items || [])]);
+        setNextPlaylistsUrl(playlistsData.next || '');
+      } else {
+        console.error('Failed to fetch library');
+        setStatusMessage('We could not load your library. Please sign in again.');
+      }
+    } catch (error) {
+      console.error('Error fetching library:', error);
+      setStatusMessage('Network error while loading your library.');
+    } finally {
+      setLibraryLoading(false);
+    }
+  };
+
+  const loadMorePlaylists = async () => {
+    if (!nextPlaylistsUrl || loadingMorePlaylists) {
+      return;
+    }
+
+    setLoadingMorePlaylists(true);
+    setStatusMessage('');
+
+    try {
+      const response = await fetch(nextPlaylistsUrl, {
         headers: {
           Authorization: `Bearer ${accessToken}`,
         },
@@ -235,16 +292,17 @@ export default function Home() {
 
       if (response.ok) {
         const data = await response.json();
-        setPlaylists(data.items || []);
+        setPlaylists((prev) => [...prev, ...(data.items || [])]);
+        setNextPlaylistsUrl(data.next || '');
       } else {
-        console.error('Failed to fetch playlists');
-        setStatusMessage('We could not load your playlists. Please sign in again.');
+        console.error('Failed to load more playlists');
+        setStatusMessage('We could not load more playlists right now.');
       }
     } catch (error) {
-      console.error('Error fetching playlists:', error);
-      setStatusMessage('Network error while loading playlists.');
+      console.error('Error loading more playlists:', error);
+      setStatusMessage('Network error while loading more playlists.');
     } finally {
-      setLoading(false);
+      setLoadingMorePlaylists(false);
     }
   };
 
@@ -286,9 +344,53 @@ export default function Home() {
     }
   };
 
+  const fetchLikedSongs = async () => {
+    setLoading(true);
+    setTracks([]);
+    setFilteredTracks([]);
+    setStatusMessage('');
+
+    try {
+      let allTracks = [];
+      let nextUrl = 'https://api.spotify.com/v1/me/tracks?limit=50';
+
+      while (nextUrl) {
+        const response = await fetch(nextUrl, {
+          headers: {
+            Authorization: `Bearer ${accessToken}`,
+          },
+        });
+
+        if (response.ok) {
+          const data = await response.json();
+          allTracks = [...allTracks, ...(data.items || [])];
+          nextUrl = data.next;
+        } else {
+          console.error('Failed to fetch liked songs');
+          setStatusMessage('We could not load your liked songs.');
+          break;
+        }
+      }
+
+      setTracks(allTracks);
+      setFilteredTracks(allTracks);
+    } catch (error) {
+      console.error('Error fetching liked songs:', error);
+      setStatusMessage('Network error while loading your liked songs.');
+    } finally {
+      setLoading(false);
+    }
+  };
+
   const handlePlaylistSelect = (playlist) => {
     setSelectedPlaylist(playlist);
     setSearchTerm('');
+
+    if (playlist.isLikedSongs) {
+      fetchLikedSongs();
+      return;
+    }
+
     fetchPlaylistTracks(playlist.id);
   };
 
@@ -303,6 +405,7 @@ export default function Home() {
   const handleLogout = () => {
     setAccessToken('');
     setPlaylists([]);
+    setNextPlaylistsUrl('');
     setSelectedPlaylist(null);
     setTracks([]);
     setFilteredTracks([]);
@@ -331,7 +434,6 @@ export default function Home() {
         <section className={`${styles.appCard} ${styles.loginCard}`}>
           <div className={styles.loginLayout}>
             <div className={styles.loginStack}>
-              
               <h1 className={styles.sectionTitle}>Spotify Enhanced Search</h1>
               <p className={styles.sectionText}>
                 Sign in with Spotify to browse your playlists, filter tracks by song, artist, album, or year,
@@ -341,7 +443,6 @@ export default function Home() {
                 <button className={styles.primaryButton} onClick={handleLogin}>
                   Continue with Spotify
                 </button>
-                
               </div>
               {renderStatus()}
             </div>
@@ -359,7 +460,9 @@ export default function Home() {
             <div>
               <span className={styles.eyebrow}>Your library</span>
               <h1 className={styles.sectionTitle}>Choose a playlist to search</h1>
-              <p className={styles.sectionText}>Pick any playlist below and we&apos;ll load every track for search.</p>
+              <p className={styles.sectionText}>
+                Start with your liked songs or pick any playlist below and we&apos;ll load every track for search.
+              </p>
             </div>
             <button className={styles.secondaryButton} onClick={handleLogout}>
               Log out
@@ -368,12 +471,13 @@ export default function Home() {
 
           {renderStatus()}
 
-          {loading ? (
+          {libraryLoading ? (
             <div className={styles.emptyState}>
               <div className={styles.spinner} aria-hidden="true" />
-              <p>Loading playlists...</p>
+              <p>Loading your library...</p>
             </div>
           ) : (
+            <>
             <div className={styles.playlistGrid}>
               {playlists.map((playlist) => {
                 const image = playlist.images?.[0]?.url;
@@ -389,20 +493,32 @@ export default function Home() {
                       {image ? (
                         <img src={image} alt="" className={styles.playlistImage} />
                       ) : (
-                        <div className={styles.artworkFallback}>♪</div>
+                        <div className={styles.artworkFallback}>{playlist.isLikedSongs ? '♥' : '♪'}</div>
                       )}
                     </div>
                     <div className={styles.playlistContent}>
                       <h2 className={styles.playlistTitle}>{playlist.name}</h2>
                       <p className={styles.playlistMeta}>{getPlaylistSubtitle(playlist)}</p>
-                      <p className={styles.playlistDescription}>
-                        {getPlaylistDescription(playlist)}
-                      </p>
+                      <p className={styles.playlistDescription}>{getPlaylistDescription(playlist)}</p>
                     </div>
                   </button>
                 );
               })}
             </div>
+
+              {nextPlaylistsUrl ? (
+                <div className={styles.loadMoreRow}>
+                  <button
+                    type="button"
+                    className={styles.secondaryButton}
+                    onClick={loadMorePlaylists}
+                    disabled={loadingMorePlaylists}
+                  >
+                    {loadingMorePlaylists ? 'Loading more playlists...' : 'Load more playlists'}
+                  </button>
+                </div>
+              ) : null}
+            </>
           )}
         </section>
       </main>
@@ -418,7 +534,7 @@ export default function Home() {
               <button className={styles.ghostButton} onClick={handleBackToPlaylists}>
                 ← Back to playlists
               </button>
-              <span className={styles.badge}>Playlist search</span>
+              <span className={styles.badge}>{selectedPlaylist.isLikedSongs ? 'Liked songs search' : 'Playlist search'}</span>
             </div>
             <h1 className={styles.sectionTitle}>{selectedPlaylist.name}</h1>
             <p className={styles.sectionText}>Filter by title, artist, album, or release year.</p>
@@ -444,11 +560,7 @@ export default function Home() {
           <div className={styles.filterRow}>
             {Object.entries(searchFilters).map(([key, value]) => (
               <label key={key} className={styles.filterChip}>
-                <input
-                  type="checkbox"
-                  checked={value}
-                  onChange={() => handleFilterChange(key)}
-                />
+                <input type="checkbox" checked={value} onChange={() => handleFilterChange(key)} />
                 <span>{searchFilterLabels[key]}</span>
               </label>
             ))}

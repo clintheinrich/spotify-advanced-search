@@ -325,6 +325,12 @@
   gap: 18px;
 }
 
+.loadMoreRow {
+  display: flex;
+  justify-content: center;
+  margin-top: 24px;
+}
+
 .playlistCard {
   display: grid;
   grid-template-columns: 88px minmax(0, 1fr);
