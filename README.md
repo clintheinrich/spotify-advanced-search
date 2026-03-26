@@ -6,6 +6,7 @@ You will need to:
 3. create a .env.local file with:
 
 NEXT_PUBLIC_SPOTIFY_CLIENT_ID=your_client_ID_here
+
 NEXT_PUBLIC_REDIRECT_URI=http://127.0.0.1:3000
 
 Then run "npm install"
