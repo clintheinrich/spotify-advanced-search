@@ -460,9 +460,6 @@ export default function Home() {
             <div>
               <span className={styles.eyebrow}>Your library</span>
               <h1 className={styles.sectionTitle}>Choose a playlist to search</h1>
-              <p className={styles.sectionText}>
-                Start with your liked songs or pick any playlist below and we&apos;ll load every track for search.
-              </p>
             </div>
             <button className={styles.secondaryButton} onClick={handleLogout}>
               Log out
